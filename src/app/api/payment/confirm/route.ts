@@ -33,7 +33,9 @@ export async function POST(req: Request) {
 
     let statusResp = null;
     try {
-      statusResp = await core.transaction.status(orderId);
+      // `midtrans-client` does not have TypeScript types for nested `transaction` on CoreApi,
+      // cast to `any` to call the runtime method.
+      statusResp = await (core as any).transaction.status(orderId);
     } catch (e) {
       // If Midtrans status check fails, fallback to order.status
       console.warn("Midtrans status check failed", e);
@@ -77,6 +79,9 @@ export async function POST(req: Request) {
       // Try to sync Google Calendar (create event) similar to webhook flow
       try {
         const booking = await UserBooking.getBookingById(newBookingId.toString());
+        if (!booking) {
+          throw new Error("Booking not found after insert");
+        }
         const userData = await User.getUserById(booking.userId.toString());
         const doctorData = await User.getUserById(booking.staffId.toString());
 
@@ -140,6 +145,9 @@ export async function POST(req: Request) {
       // Send confirmation emails to both patient and doctor
       try {
         const finalBooking = await UserBooking.getBookingById(newBookingId.toString());
+        if (!finalBooking) {
+          throw new Error("Final booking not found");
+        }
         const finalUserData = await User.getUserById(finalBooking.userId.toString());
         const finalDoctorData = await User.getUserById(finalBooking.staffId.toString());
 

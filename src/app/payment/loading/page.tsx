@@ -1,13 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function PaymentLoadingPage() {
-  const searchParams = useSearchParams();
   const router = useRouter();
-  const orderId = searchParams.get("orderId");
+  const [orderId, setOrderId] = useState<string | null>(null);
   const [status, setStatus] = useState("checking");
+
+  useEffect(() => {
+    try {
+      const p = new URL(window.location.href).searchParams;
+      setOrderId(p.get("orderId"));
+    } catch (e) {
+      setOrderId(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (!orderId) {
