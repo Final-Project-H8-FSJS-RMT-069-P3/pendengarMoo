@@ -167,9 +167,9 @@ export default function AboutPage() {
               <div className="bg-white rounded-[2rem] shadow-sm overflow-hidden group hover:shadow-xl transition-all duration-300 border border-transparent hover:border-blue-100">
                 <div className="relative h-64 overflow-hidden bg-gray-100">
                   <img
-                    src="https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=500&q=80"
-                    alt="Dr. Sari Kusuma"
-                    className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                    src="/uploads/ve.jpg"
+                    alt="Vincentius E. pic"
+                    className="w-full h-full object-cover object-center scale-110 group-hover:scale-125 transition-transform duration-500"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-blue-900/60 to-transparent" />
                 </div>
@@ -178,11 +178,10 @@ export default function AboutPage() {
                     Vincentius E.
                   </h3>
                   <p className="text-orange-500 font-bold text-sm mb-3">
-                    Team Leader
+                    Project/Team Leader
                   </p>
                   <p className="text-gray-500 text-sm leading-relaxed">
-                    Psikolog klinis dengan 15 tahun pengalaman, berfokus pada
-                    terapi kognitif-perilaku dan kesehatan mental perempuan.
+                    Memimpin pengembangan pendengarMu dengan mengoordinasikan tim untuk menciptakan platform kesehatan mental yang aman, responsif, dan mudah diakses bagi masyarakat.
                   </p>
                 </div>
               </div>
