@@ -33,10 +33,13 @@ type CreateCalendarEventInput = {
 function ensureOAuthEnv(redirectUriOverride?: string) {
   const clientId = process.env.AUTH_GOOGLE_ID;
   const clientSecret = process.env.AUTH_GOOGLE_SECRET;
+  const defaultBaseUrl =
+    process.env.AUTH_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
   const redirectUri =
     redirectUriOverride ||
     process.env.GOOGLE_OAUTH_REDIRECT_URI ||
-    new URL("/api/calendar/callback", process.env.AUTH_URL || "http://localhost:3000").toString();
+    new URL("/api/calendar/callback", defaultBaseUrl).toString();
 
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error(
