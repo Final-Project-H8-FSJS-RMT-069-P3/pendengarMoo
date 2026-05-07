@@ -265,7 +265,7 @@ const features = [
 ];
 
 export default function MentalHealthGuide() {
-  const [expanded, setExpanded] = useState(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   return (
     <>

@@ -51,12 +51,8 @@ export default class FormBrief {
       throw new NotFoundError("User not found");
     }
     const targetUserId = ObjectId.isValid(userId) ? new ObjectId(userId) : userId;
-    const formBriefs = await collection
-      .find({
-        $or: [{ userId: targetUserId }, { userId }],
-      })
-      .sort({ createdAt: -1 })
-      .toArray();
+    const filter: any = { $or: [{ userId: targetUserId }, { userId }] };
+    const formBriefs = await collection.find(filter).sort({ createdAt: -1 }).toArray();
 
     return formBriefs.map((formBrief) =>
       serializeFormBrief(formBrief as WithId<IFormBrief>)

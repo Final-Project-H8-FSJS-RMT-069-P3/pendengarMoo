@@ -595,7 +595,7 @@ export default function ProfilePage() {
                         }));
                       }}
                       onFileUploadFailed={(err) => {
-                        setError("Upload gambar gagal: " + err.message);
+                        setError("Upload gambar gagal: " + ((err as any)?.message ?? String(err)));
                       }}
                     />
                   </div>

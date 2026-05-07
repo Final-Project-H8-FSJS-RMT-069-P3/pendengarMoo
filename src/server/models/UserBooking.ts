@@ -209,6 +209,7 @@ export default class UserBooking {
 
     // re-fetch booking to check status
     const updated = await collection.findOne({ _id: toObjectId(bookingId) });
+    if (!updated) throw new Error("Booking not found after update");
     const userDone = !!updated.userStatus;
     const doctorDone = !!updated.doctorStatus;
 
