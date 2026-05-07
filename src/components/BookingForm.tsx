@@ -59,7 +59,7 @@ export default function BookingForm({ staffId }: BookingFormProps) {
       }
     }
     fetchDoctors();
-  }, [selectedDoctorId]);
+  }, []);
 
   useEffect(() => {
     const selected = doctors.find((d) => d._id === selectedDoctorId);
@@ -132,6 +132,7 @@ export default function BookingForm({ staffId }: BookingFormProps) {
 
   async function handleBooking(e: FormEvent) {
     e.preventDefault();
+    console.log("Booking submit", { selectedDoctorId, selectedDate, selectedTime, amount, sessionType });
     setIsLoading(true);
     setError(null);
     setSuccess(null);
