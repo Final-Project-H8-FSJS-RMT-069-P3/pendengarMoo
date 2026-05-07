@@ -23,6 +23,8 @@ type Booking = {
   amount: number;
   isPaid: boolean;
   isDone: boolean;
+  userStatus?: boolean;
+  doctorStatus?: boolean;
   isReviewed?: boolean;
   createdAt: string;
   userName: string;
@@ -35,8 +37,13 @@ type BookingApiResponse = {
   data?: Booking[];
 };
 
-type ReviewedBookingsResponse = {
-  data?: string[];
+type ReviewLookupResponse = {
+  data?: {
+    _id?: string;
+    bookingId?: string;
+    comment?: string;
+    rating?: number;
+  } | null;
 };
 
 const formatDateTime = (value: string) => {
@@ -68,6 +75,13 @@ const formatSessionType = (type?: string) => {
       return "Unknown";
   }
 };
+
+const getParticipantDone = (booking: Booking, role: "USER" | "DOCTOR" | null) => {
+  if (role === "DOCTOR") return !!booking.doctorStatus;
+  if (role === "USER") return !!booking.userStatus;
+  return !!booking.userStatus || !!booking.doctorStatus;
+};
+
 const handlePay = async (bookingId: string) => {
   try {
     const res = await fetch("/api/token-payment", {
@@ -83,13 +97,23 @@ const handlePay = async (bookingId: string) => {
     if (!res.ok) throw new Error(data.message);
 
     if (window.snap) {
-      window.snap.pay(data.token);
+      window.snap.pay(data.token, {
+        onSuccess: () => {
+          window.location.href = `/payment/loading?orderId=${encodeURIComponent(data.orderId)}`;
+        },
+        onPending: () => {
+          alert("Transaksi masih pending. Silakan selesaikan instruksi pembayaran di Midtrans terlebih dahulu.");
+        },
+        onError: () => {
+          alert("Pembayaran gagal diproses");
+        },
+      });
     } else {
       alert("Midtrans Snap belum load");
     }
   } catch (err) {
     console.error(err);
-    alert("Gagal memulai pembayaran");
+    alert(err instanceof Error ? err.message : "Gagal memulai pembayaran");
   }
 };
 
@@ -119,6 +143,7 @@ export default function BookingListPage() {
     sessionRole === "doctor" || sessionRole === "psychiatrist";
   const isDoctor = role === "DOCTOR";
   const [reviewTarget, setReviewTarget] = useState<Booking | null>(null);
+  const [reviewQueued, setReviewQueued] = useState(false);
   useEffect(() => {
     let isMounted = true;
     const fetchBookings = async () => {
@@ -129,23 +154,6 @@ export default function BookingListPage() {
           throw new Error(payload.message || "Failed to fetch bookings");
 
         let normalizedBookings = payload.data || [];
-
-        if (payload.role === "USER") {
-          const reviewedResponse = await fetch("/api/reviews/me", {
-            cache: "no-store",
-          });
-
-          if (reviewedResponse.ok) {
-            const reviewedPayload =
-              (await reviewedResponse.json()) as ReviewedBookingsResponse;
-            const reviewedBookingIds = new Set(reviewedPayload.data || []);
-
-            normalizedBookings = normalizedBookings.map((booking) => ({
-              ...booking,
-              isReviewed: reviewedBookingIds.has(booking._id),
-            }));
-          }
-        }
 
         if (isMounted) {
           setBookings(normalizedBookings);
@@ -168,14 +176,63 @@ export default function BookingListPage() {
   }, []);
 
   useEffect(() => {
-    if (!loading && bookings.length > 0 && role === "USER") {
-      const doneBooking = bookings.find((b) => b.isDone && !b.isReviewed);
-
-      if (doneBooking) {
-        setReviewTarget(doneBooking);
-      }
+    if (
+      loading ||
+      role !== "USER" ||
+      bookings.length === 0 ||
+      reviewTarget ||
+      reviewQueued
+    ) {
+      return;
     }
-  }, [loading, bookings, role]);
+
+    let cancelled = false;
+
+    const openReviewIfNeeded = async () => {
+      const doneBookings = bookings
+        .filter((booking) => booking.isDone)
+        .sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+
+      const latestDoneBooking = doneBookings[0];
+      if (!latestDoneBooking) {
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/reviews/me?bookingId=${latestDoneBooking._id}`,
+          {
+            cache: "no-store",
+          },
+        );
+        const payload = (await response.json()) as ReviewLookupResponse;
+
+        if (!response.ok) {
+          return;
+        }
+
+        if (!payload.data && !cancelled) {
+          setReviewQueued(true);
+          setReviewTarget(latestDoneBooking);
+          return;
+        }
+      } catch (err) {
+        console.error(
+          "Failed to fetch review for booking",
+          latestDoneBooking._id,
+          err,
+        );
+      }
+    };
+
+    void openReviewIfNeeded();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, bookings, role, reviewTarget, reviewQueued]);
   async function handleMarkDone(bookingId: string, roomName?: string) {
     try {
       setClickedDone((s) => ({ ...s, [bookingId]: true }));
@@ -205,6 +262,11 @@ export default function BookingListPage() {
   const pageTitle = useMemo(() => {
     return role === "DOCTOR" ? "Daftar Booking Pasien" : "Daftar Booking Saya";
   }, [role]);
+
+  const handleDoneDisabled = (booking: Booking) => {
+    return getParticipantDone(booking, role) || !!clickedDone[booking._id];
+  };
+
 
   const availableBalance = useMemo(() => {
     if (!isDoctor) return 0;
@@ -430,19 +492,19 @@ export default function BookingListPage() {
                                 </button>
                               )}
                               {/* Done button - both roles can mark done */}
-                              {!booking.isDone && (
+                              {!booking.isDone && !getParticipantDone(booking, role) && (
                                 <button
                                   onClick={() => handleMarkDone(booking._id)}
-                                  disabled={!!clickedDone[booking._id]}
+                                  disabled={handleDoneDisabled(booking)}
                                   style={{
-                                    cursor: clickedDone[booking._id]
+                                    cursor: handleDoneDisabled(booking)
                                       ? "not-allowed"
                                       : "pointer",
                                   }}
                                   className={`flex-1 text-xs px-4 py-3 font-black rounded-xl border transition-all active:scale-95 ${
-                                    clickedDone[booking._id]
-                                      ? "bg-slate-100 text-slate-600 border-slate-200"
-                                      : "bg-green-50 text-green-700 border-green-100 hover:bg-green-100"
+                                    handleDoneDisabled(booking)
+                                      ? "bg-slate-300 text-slate-700 border-slate-400 shadow-none opacity-90"
+                                      : "bg-emerald-500 text-white border-emerald-600 shadow-md hover:bg-emerald-600 hover:shadow-lg hover:-translate-y-0.5"
                                   }`}
                                 >
                                   {clickedLoading[booking._id] ? (
@@ -474,10 +536,20 @@ export default function BookingListPage() {
                                   )}
                                 </button>
                               )}
+                              {booking.isDone && (
+                                <span className="flex-1 text-xs px-4 py-3 font-black rounded-xl border bg-slate-300 text-slate-700 border-slate-400 text-center opacity-90 shadow-none">
+                                  Done
+                                </span>
+                              )}
+                              {!booking.isDone && getParticipantDone(booking, role) && (
+                                <span className="flex-1 text-xs px-4 py-3 font-black rounded-xl border bg-slate-300 text-slate-700 border-slate-400 text-center opacity-90 shadow-none">
+                                  Done
+                                </span>
+                              )}
                             </div>
                           </td>
                           {/* Session — cursor pointer paksa ke semua child */}
-                          <td className="px-4 py-3 cursor-pointer [&_*]:cursor-pointer">
+                          <td className="px-4 py-3 cursor-pointer **:cursor-pointer">
                             {booking.isPaid && !booking.isDone && (
                               <StartSessionButton
                                 bookingId={booking._id}
@@ -570,7 +642,7 @@ export default function BookingListPage() {
                       </div>
 
                       {/* Action buttons — berdampingan */}
-                      <div className="flex items-center gap-2 kursor-pointer">
+                      <div className="flex items-center gap-2 cursor-pointer">
                         {/* Pay Now — user yang belum bayar */}
                         {!isPsychiatrist && !booking.isPaid && (
                           <button
@@ -600,18 +672,18 @@ export default function BookingListPage() {
                             Lihat Brief
                           </button>
                         )}
-                        {!booking.isDone && (
+                        {!booking.isDone && !getParticipantDone(booking, role) && (
                           <button
                             onClick={() => handleMarkDone(booking._id)}
-                            disabled={!!clickedDone[booking._id]}
+                            disabled={handleDoneDisabled(booking)}
                             className={`text-xs px-3 py-1.5 font-semibold rounded-lg transition-colors whitespace-nowrap border ${
-                              clickedDone[booking._id]
-                                ? "bg-slate-100 text-slate-600 border-slate-200 cursor-not-allowed"
-                                : "bg-green-50 text-green-700 border-green-100 hover:bg-green-100 cursor-pointer"
+                              handleDoneDisabled(booking)
+                                ? "bg-slate-300 text-slate-700 border-slate-400 cursor-not-allowed opacity-90 shadow-none"
+                                : "bg-emerald-500 text-white border-emerald-600 shadow-md hover:bg-emerald-600 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer"
                             }`}
                           >
                             {clickedLoading[booking._id] ? (
-                              <span className="inline-flex items-center justify-center kursor-pointer">
+                              <span className="inline-flex items-center justify-center cursor-pointer">
                                 <svg
                                   className="animate-spin h-4 w-4 mr-2 text-slate-600"
                                   xmlns="http://www.w3.org/2000/svg"
@@ -639,6 +711,16 @@ export default function BookingListPage() {
                             )}
                           </button>
                         )}
+                          {!booking.isDone && getParticipantDone(booking, role) && (
+                            <span className="text-xs px-3 py-1.5 font-semibold rounded-lg whitespace-nowrap border bg-slate-300 text-slate-700 border-slate-400 cursor-not-allowed opacity-90 shadow-none">
+                              Done
+                            </span>
+                          )}
+                          {booking.isDone && (
+                            <span className="text-xs px-3 py-1.5 font-semibold rounded-lg whitespace-nowrap border bg-slate-300 text-slate-700 border-slate-400 cursor-not-allowed opacity-90 shadow-none">
+                              Done
+                            </span>
+                          )}
                       </div>
                     </div>
                   ))
@@ -657,7 +739,9 @@ export default function BookingListPage() {
               bookingId={reviewTarget._id}
               staffName={reviewTarget.staffName}
               onClose={() => setReviewTarget(null)}
-              onSuccess={() => setReviewTarget(null)}
+              onSuccess={() => {
+                setReviewTarget(null);
+              }}
             />
           )}
         </div>

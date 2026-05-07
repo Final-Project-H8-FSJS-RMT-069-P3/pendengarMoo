@@ -6,18 +6,26 @@ import { useRouter } from "next/navigation";
 export default function PaymentLoadingPage() {
   const router = useRouter();
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [queryResolved, setQueryResolved] = useState(false);
   const [status, setStatus] = useState("checking");
+  const [statusMessage, setStatusMessage] = useState("Please wait while we verify your payment...");
 
   useEffect(() => {
     try {
       const p = new URL(window.location.href).searchParams;
-      setOrderId(p.get("orderId"));
+      setOrderId(p.get("orderId") || p.get("order_id"));
     } catch (e) {
       setOrderId(null);
+    } finally {
+      setQueryResolved(true);
     }
   }, []);
 
   useEffect(() => {
+    if (!queryResolved) {
+      return;
+    }
+
     if (!orderId) {
       setStatus("missing");
       setTimeout(() => router.push("/bookinglist"), 2000);
@@ -26,34 +34,73 @@ export default function PaymentLoadingPage() {
 
     let cancelled = false;
 
-    async function checkOnce() {
-      try {
-        const res = await fetch("/api/payment/confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          if (!cancelled) router.replace("/bookinglist");
-        } else {
-          // failed or pending
-          setStatus("failed");
-          setTimeout(() => router.replace("/bookinglist"), 2200);
+    async function checkUntilReady() {
+      const maxChecks = 20;
+      const delayMs = 1500;
+
+      for (let attempt = 1; attempt <= maxChecks; attempt++) {
+        if (cancelled) return;
+
+        setStatusMessage(`Syncing payment and booking data (${attempt}/${maxChecks})...`);
+
+        let res: Response;
+        let data: any;
+
+        try {
+          res = await fetch("/api/payment/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ orderId }),
+          });
+          data = await res.json();
+        } catch (err) {
+          console.error(err);
+          if (attempt === maxChecks) {
+            setStatus("error");
+            setTimeout(() => router.replace("/bookinglist"), 2200);
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
         }
-      } catch (err) {
-        console.error(err);
-        setStatus("error");
+
+        if (data?.success) {
+          if (!cancelled) router.replace("/bookinglist");
+          return;
+        }
+
+        const pendingStatuses = ["pending", "processing", "challenge", "authorize"];
+        const isStillProcessing =
+          res.status === 202 ||
+          pendingStatuses.includes(String(data?.status || "").toLowerCase()) ||
+          data?.message === "Order not found";
+
+        if (isStillProcessing && attempt < maxChecks) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        if (isStillProcessing) {
+          setStatus("checking");
+          setStatusMessage("Payment is still pending in Midtrans. Complete the payment first, then reopen this page.");
+          return;
+        }
+
+        setStatus("failed");
         setTimeout(() => router.replace("/bookinglist"), 2200);
+        return;
       }
+
+      setStatus("failed");
+      setTimeout(() => router.replace("/bookinglist"), 2200);
     }
 
-    void checkOnce();
+    void checkUntilReady();
 
     return () => {
       cancelled = true;
     };
-  }, [orderId, router]);
+  }, [orderId, queryResolved, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -82,7 +129,7 @@ export default function PaymentLoadingPage() {
             </svg>
             <div>
               <h2 className="text-2xl font-bold text-slate-900">Processing Payment</h2>
-              <p className="text-sm text-slate-500 mt-2">Please wait while we verify your payment...</p>
+              <p className="text-sm text-slate-500 mt-2">{statusMessage}</p>
             </div>
           </div>
         )}

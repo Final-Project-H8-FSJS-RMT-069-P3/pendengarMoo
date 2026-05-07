@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
         secure: true,
       },
       callbacks: {
-        finish: `${baseUrl}/bookinglist`,
+        finish: `${baseUrl}/payment/loading?orderId=${orderId}`,
       },
     };
 

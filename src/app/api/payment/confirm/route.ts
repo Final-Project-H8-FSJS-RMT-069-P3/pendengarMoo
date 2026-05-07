@@ -35,7 +35,10 @@ export async function POST(req: Request) {
 
     if (!order) {
       console.warn(`Order ${orderId} not found after ${maxAttempts} attempts`);
-      return NextResponse.json({ message: "Order not found" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, status: "processing", message: "Order is still syncing" },
+        { status: 202 },
+      );
     }
 
     // Use CoreApi to check transaction status
@@ -59,6 +62,8 @@ export async function POST(req: Request) {
 
     // Consider success states
     const successStates = ["settlement", "capture", "success"];
+    const pendingStates = ["pending", "authorize", "challenge", "processing"];
+    const failedStates = ["deny", "cancel", "expire", "failure", "failed"];
 
     if (successStates.includes(txStatus)) {
       // If booking already created, just return success
@@ -76,16 +81,26 @@ export async function POST(req: Request) {
       bookingPayload.isPaid = true;
       bookingPayload.createdAt = new Date(bookingPayload.createdAt || Date.now());
 
-      const insertRes = await db.collection("UserBookings").insertOne(bookingPayload);
-      const newBookingId = insertRes.insertedId;
+      const existingBooking = await db.collection("UserBookings").findOne({ orderId });
+      let newBookingId: ObjectId;
 
-      const roomName = `room-${newBookingId.toString()}`;
-      await db.collection("Rooms").insertOne({
-        userId: bookingPayload.userId,
-        staffId: bookingPayload.staffId,
-        roomName,
-        createdAt: new Date(),
-      });
+      if (existingBooking?._id) {
+        newBookingId = existingBooking._id as ObjectId;
+      } else {
+        const insertRes = await db.collection("UserBookings").insertOne({
+          ...bookingPayload,
+          orderId,
+        });
+        newBookingId = insertRes.insertedId;
+
+        const roomName = `room-${newBookingId.toString()}`;
+        await db.collection("Rooms").insertOne({
+          userId: bookingPayload.userId,
+          staffId: bookingPayload.staffId,
+          roomName,
+          createdAt: new Date(),
+        });
+      }
 
       // Update order
       await db.collection("Orders").updateOne({ orderId }, { $set: { bookingId: newBookingId, status: "success", updatedAt: new Date() } });
@@ -256,9 +271,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, bookingId: newBookingId.toString() });
     }
 
-    // Not successful yet - mark failed and return status
-    await db.collection("Orders").updateOne({ orderId }, { $set: { status: "failed", updatedAt: new Date() } });
-    return NextResponse.json({ success: false, status: txStatus });
+    // Keep waiting for webhook/confirm synchronization while payment is still in-progress.
+    if (pendingStates.includes(txStatus)) {
+      return NextResponse.json({ success: false, status: txStatus }, { status: 202 });
+    }
+
+    if (failedStates.includes(txStatus)) {
+      await db
+        .collection("Orders")
+        .updateOne({ orderId }, { $set: { status: "failed", updatedAt: new Date() } });
+      return NextResponse.json({ success: false, status: txStatus });
+    }
+
+    return NextResponse.json({ success: false, status: txStatus || "unknown" }, { status: 202 });
   } catch (error) {
     console.error("Payment confirm error:", error);
     return NextResponse.json({ message: "Internal Server Error" }, { status: 500 });

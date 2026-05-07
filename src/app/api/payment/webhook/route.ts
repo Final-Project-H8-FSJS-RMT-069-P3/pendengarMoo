@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Order from "@/server/models/Order";
 import UserBooking from "@/server/models/UserBooking";
 import User from "@/server/models/User";
+import { getDB } from "@/server/config/mongodb";
 import { sendWhatsApp } from "@/server/helpers/sendWa";
 import { SendEmail } from "@/server/helpers/sendEmail";
 import {
@@ -42,8 +43,52 @@ export async function POST(request: NextRequest) {
     await Order.updateOrderStatus(order_id, orderStatus);
 
     if (orderStatus === "success") {
-      const order = await Order.getOrderById(order_id);
+      const db = await getDB();
+      let order = await Order.getOrderById(order_id);
       console.log("[webhook] Order retrieved:", { orderId: order_id, bookingId: order?.bookingId });
+
+      if (!order) {
+        return NextResponse.json({ message: "Order not found" }, { status: 404 });
+      }
+
+      if (!order.bookingId) {
+        const bookingPayload = (order as any).bookingPayload;
+
+        if (!bookingPayload) {
+          console.error("[webhook] Missing booking payload on paid order:", order_id);
+          return NextResponse.json({ message: "Booking payload not found" }, { status: 400 });
+        }
+
+        bookingPayload.isPaid = true;
+        bookingPayload.createdAt = new Date(bookingPayload.createdAt || Date.now());
+
+        const existingBooking = await db.collection("UserBookings").findOne({ orderId: order_id });
+        const bookingId =
+          existingBooking?._id ||
+          (
+            await db.collection("UserBookings").insertOne({
+              ...bookingPayload,
+              orderId: order_id,
+            })
+          ).insertedId;
+
+        if (!existingBooking) {
+          const roomName = `room-${bookingId.toString()}`;
+          await db.collection("Rooms").insertOne({
+            userId: bookingPayload.userId,
+            staffId: bookingPayload.staffId,
+            roomName,
+            createdAt: new Date(),
+          });
+        }
+
+        await db.collection("Orders").updateOne(
+          { orderId: order_id },
+          { $set: { bookingId, updatedAt: new Date() } },
+        );
+
+        order = await Order.getOrderById(order_id);
+      }
 
       if (!order?.bookingId) {
         console.error("[webhook] No booking ID found in order:", order_id);
