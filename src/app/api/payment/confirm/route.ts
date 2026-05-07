@@ -19,8 +19,22 @@ export async function POST(req: Request) {
     }
 
     const db = await getDB();
-    const order = await db.collection("Orders").findOne({ orderId });
+    // transient DB replication or write delays can cause the order to be
+    // unavailable immediately after payment redirect. Retry briefly before
+    // returning 404 to avoid false negatives.
+    let order = null as any;
+    const maxAttempts = 10;
+    const delayMs = 300;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      order = await db.collection("Orders").findOne({ orderId });
+      if (order) break;
+      // last attempt - don't delay
+      if (attempt === maxAttempts) break;
+      await new Promise((res) => setTimeout(res, delayMs));
+    }
+
     if (!order) {
+      console.warn(`Order ${orderId} not found after ${maxAttempts} attempts`);
       return NextResponse.json({ message: "Order not found" }, { status: 404 });
     }
 

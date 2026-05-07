@@ -136,9 +136,16 @@ export async function POST(req: Request) {
       },
     };
 
-    const transaction = await snap.createTransaction(parameter);
+    let transaction;
+    try {
+      transaction = await snap.createTransaction(parameter);
+      console.log("Midtrans transaction:", transaction);
+    } catch (midErr: unknown) {
+      console.error("Midtrans createTransaction error:", midErr);
+      throw midErr;
+    }
 
-    if (!transaction.token) {
+    if (!transaction?.token) {
       console.error("Midtrans token missing:", transaction);
       throw new Error("Failed to get Midtrans token");
     }
